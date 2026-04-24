@@ -283,6 +283,7 @@
         </a>
         @if (Auth::check())
             <div style="display: flex; gap: 1rem;">
+                <a href="{{ route('usage') }}" class="brand">API Usage</a>
                 <a href="{{ route('logout') }}" class="brand">
                     Logout
                 </a>
