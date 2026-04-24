@@ -279,7 +279,7 @@
 
     <header style="display: flex; justify-content: space-between; align-items: center;">
         <a href="{{ route('home') }}" class="brand">
-            Minimal<span>AI</span>
+            Admiral<span>APIs</span>
         </a>
         @if (Auth::check())
             <div style="display: flex; gap: 1rem;">

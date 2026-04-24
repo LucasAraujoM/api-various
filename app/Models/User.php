@@ -7,6 +7,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Str;
@@ -46,5 +47,36 @@ class User extends Authenticatable
     {
         $this->api_key = Str::random(64);
         $this->save();
+    }
+
+    // ─── Relationships ───────────────────────────────────────
+
+    public function validations(): HasMany
+    {
+        return $this->hasMany(Validation::class);
+    }
+
+    public function bulkJobs(): HasMany
+    {
+        return $this->hasMany(BulkJob::class);
+    }
+
+    // ─── Credits ─────────────────────────────────────────────
+
+    /**
+     * Check if the user has enough credits to make a request.
+     */
+    public function hasCredits(int $amount = 1): bool
+    {
+        return $this->credits >= $amount;
+    }
+
+    /**
+     * Atomically deduct credits from the user.
+     */
+    public function deductCredit(int $amount = 1): void
+    {
+        $this->decrement('credits', $amount);
+        $this->refresh();
     }
 }
