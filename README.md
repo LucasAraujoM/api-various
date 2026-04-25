@@ -1,58 +1,206 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Admiral APIs - Email Validation Platform
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A powerful email validation API that checks email addresses in real-time using syntax validation, MX records, and SMTP verification. Built with Laravel.
 
-## About Laravel
+## Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **Single Email Validation** - Validate one email at a time
+- **Bulk Email Validation** - Process thousands of emails via CSV/Excel upload
+- **Real-time Verification** - SMTP, MX, and syntax checks
+- **Detailed Results** - Score, validity status, disposable detection, and more
+- **RESTful API** - Simple JSON API with API key authentication
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Framework**: Laravel 13
+- **Database**: SQLite (development) / PostgreSQL (production)
+- **PHP**: 8.3+
+- **Frontend**: Blade templates with custom dark theme
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Installation
 
 ```bash
-composer require laravel/boost --dev
+# Clone the repository
+git clone https://github.com/your-repo/admiral-apis.git
+cd admiral-apis
 
-php artisan boost:install
+# Install dependencies
+composer install
+
+# Copy environment file
+cp .env.example .env
+
+# Generate key
+php artisan key:generate
+
+# Run migrations
+php artisan migrate
+
+# Start server
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## API Endpoints
 
-## Contributing
+### Single Email Validation
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```http
+POST /api/validate-email
+Authorization: Bearer YOUR_API_KEY
+Content-Type: application/json
 
-## Code of Conduct
+{
+    "email": "user@example.com"
+}
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+**Response:**
+```json
+{
+    "valid": true,
+    "email": "user@example.com",
+    "score": 0.95,
+    "mx": true,
+    "smtp": true,
+    "free": false,
+    "disposable": false,
+    "catch_all": false,
+    "syntax": true
+}
+```
 
-## Security Vulnerabilities
+### Bulk Email Validation
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```http
+POST /api/bulk-validate-email
+Authorization: Bearer YOUR_API_KEY
+
+# Option 1: JSON array
+{
+    "emails": ["a@test.com", "b@test.com"]
+}
+
+# Option 2: File upload (multipart/form-data)
+# Field: file
+# Formats: .csv, .xlsx, .xls
+```
+
+**Response:**
+```json
+{
+    "job_id": 1,
+    "total": 2,
+    "status": "pending",
+    "message": "Bulk validation job queued successfully."
+}
+```
+
+### Check Job Status
+
+```http
+GET /api/bulk-jobs/{id}
+Authorization: Bearer YOUR_API_KEY
+```
+
+## Environment Variables
+
+```env
+APP_NAME="Admiral APIs"
+APP_URL=http://localhost:8000
+
+# Database (SQLite for dev, PostgreSQL for prod)
+DB_CONNECTION=sqlite
+# DB_CONNECTION=pgsql
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_DATABASE=your_database
+# DB_USERNAME=your_user
+# DB_PASSWORD=your_password
+
+# Optional: External API for email validation fallback
+MXCHECK_KEY=your_mxcheck_api_key
+APIXIES_KEY=your_apixies_api_key
+```
+
+## Project Structure
+
+```
+├── app/
+│   ├── Http/
+│   │   ├── Controllers/
+│   │   │   ├── APIController.php
+│   │   │   ├── AuthController.php
+│   │   │   ├── DashboardController.php
+│   │   │   ├── EmailValidationController.php
+│   │   │   └── UsageController.php
+│   │   └── Services/
+│   │       └── EmailValidationService.php
+│   ├── Jobs/
+│   │   └── ProcessBulkEmailValidation.php
+│   ├── Models/
+│   │   ├── BulkJob.php
+│   │   ├── Domain.php
+│   │   ├── Email.php
+│   │   ├── EmailSignal.php
+│   │   └── Validation.php
+├── resources/
+│   └── views/
+│       ├── auth/
+│       │   ├── login.blade.php
+│       │   └── register.blade.php
+│       ├── layout/
+│       │   └── app.blade.php
+│       └── pages/
+│           ├── dashboard.blade.php
+│           ├── docs/
+│           │   └── index.blade.php
+│           ├── home.blade.php
+│           ├── usage.blade.php
+│           └── bulk-validation.blade.php
+├── routes/
+│   ├── api.php
+│   └── web.php
+└── database/
+    └── database.sqlite
+```
+
+## Dashboard Routes
+
+| Route | Description |
+|-------|-------------|
+| `/dashboard` | Overview with stats and jobs |
+| `/usage` | Detailed validation history with filters |
+| `/bulk-validation` | Bulk jobs management |
+| `/docs` | API documentation |
+| `/login` | User login |
+| `/register` | User registration |
+
+## API Response Codes
+
+| Code | Description |
+|------|-------------|
+| 200 | Success |
+| 202 | Job queued (bulk) |
+| 400 | Bad request / Invalid email |
+| 401 | Unauthorized (invalid API key) |
+| 402 | Insufficient credits |
+| 500 | Server error |
+
+## Validation Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `valid` | boolean | Overall validation result |
+| `email` | string | The validated email |
+| `score` | float | Confidence score (0-1) |
+| `mx` | boolean | Has valid MX records |
+| `smtp` | boolean | SMTP verification passed |
+| `free` | boolean | Free email provider (gmail, yahoo, etc.) |
+| `disposable` | boolean | Disposable email detected |
+| `catch_all` | boolean | Domain has catch-all |
+| `syntax` | boolean | RFC syntax valid |
+| `source` | string | Validation source (internal/external_api) |
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT License - feel free to use for personal or commercial projects.
