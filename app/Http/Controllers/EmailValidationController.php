@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Services\EmailValidationService;
+use App\Jobs\ProcessBulkEmailValidation;
+use App\Models\BulkJob;
 use App\Models\Domain;
 use App\Models\Email;
 use App\Models\EmailSignal;
@@ -12,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class EmailValidationController extends Controller
 {
@@ -19,7 +22,7 @@ class EmailValidationController extends Controller
     {
         // ── 1. Validate input ────────────────────────────────────
         $validator = Validator::make($request->all(), [
-            'email' => ['required', 'email:rfc,dns,spoof', 'max:255'],
+            'email' => ['required', 'email:rfc', 'max:255'],
         ]);
 
         if ($validator->fails()) {
@@ -135,7 +138,96 @@ class EmailValidationController extends Controller
     }
     public function bulk(Request $request)
     {
-        $csv = $request->file('csv');
-        
+        $emails = [];
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+
+            if (!in_array($extension, ['csv', 'xlsx', 'xls'])) {
+                return response()->json([
+                    'message' => 'Invalid file type. Allowed: csv, xlsx, xls',
+                ], 400);
+            }
+
+            try {
+                $spreadsheet = IOFactory::load($file->getRealPath());
+                $worksheet = $spreadsheet->getActiveSheet();
+                $rows = $worksheet->toArray();
+
+                foreach ($rows as $row) {
+                    foreach ($row as $cell) {
+                        if (is_string($cell) && filter_var(trim($cell), FILTER_VALIDATE_EMAIL)) {
+                            $emails[] = trim($cell);
+                        }
+                    }
+                }
+
+                $emails = array_unique($emails);
+            } catch (Exception $e) {
+                return response()->json([
+                    'message' => 'Failed to parse file: ' . $e->getMessage(),
+                ], 400);
+            }
+        } else {
+            $validator = Validator::make($request->all(), [
+                'emails' => ['required', 'array', 'min:1'],
+                'emails.*' => ['required', 'email:rfc'],
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => $validator->errors()->first(),
+                ], 400);
+            }
+
+            $emails = $request->input('emails');
+        }
+
+        if (empty($emails)) {
+            return response()->json([
+                'message' => 'No valid emails found in request or file.',
+            ], 400);
+        }
+
+        $user = $request->user();
+        $total = count($emails);
+
+        if ($total > $user->credits) {
+            return response()->json([
+                'message' => "Insufficient credits. Required: {$total}, Available: {$user->credits}",
+            ], 402);
+        }
+
+        $bulkJob = BulkJob::create([
+            'user_id'  => $user->id,
+            'total'    => $total,
+            'processed' => 0,
+            'status'   => 'pending',
+        ]);
+
+        $user->deductCredit($total);
+
+        ProcessBulkEmailValidation::dispatch($bulkJob, $emails, $user->id);
+
+        return response()->json([
+            'job_id'    => $bulkJob->id,
+            'total'     => $total,
+            'status'    => 'pending',
+            'message'   => 'Bulk validation job queued successfully.',
+        ], 202);
+    }
+
+    public function status(int $id)
+    {
+        $job = BulkJob::where('user_id', auth()->id())->findOrFail($id);
+
+        return response()->json([
+            'id'       => $job->id,
+            'status'   => $job->status,
+            'total'    => $job->total,
+            'processed'=> $job->processed,
+            'results'  => $job->results,
+        ]);
     }
 }

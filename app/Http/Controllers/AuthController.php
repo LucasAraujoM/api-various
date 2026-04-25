@@ -19,10 +19,14 @@ class AuthController extends Controller
         if ($validation->fails()) {
             return redirect()->back()->withErrors($validation)->withInput();
         }
-        if (Auth::attempt($request->only('email', 'password'))) {
-            return redirect()->route('home')->with('success', 'Login successful');
+
+        $remember = $request->boolean('remember');
+
+        if (Auth::attempt($request->only('email', 'password'), $remember)) {
+            $request->session()->regenerate();
+            return redirect()->intended(route('dashboard'))->with('success', 'Login successful');
         }
-        return redirect()->back()->with('error', 'Invalid credentials');
+        return redirect()->back()->with('error', 'Invalid credentials')->withInput();
     }
 
     public function register(Request $request)
@@ -43,7 +47,7 @@ class AuthController extends Controller
             'name' => $request->name
         ]);
         Auth::login($user);
-        return redirect()->route('home')->with('success', 'Register successful');
+        return redirect()->route('dashboard')->with('success', 'Register successful');
     }
 
     public function logout()

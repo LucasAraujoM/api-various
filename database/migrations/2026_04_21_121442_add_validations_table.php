@@ -12,13 +12,25 @@ return new class extends Migration {
     {
         Schema::create('validations', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade')->index();
-            $table->foreignId('email_id')->constrained()->onDelete('cascade')->index();
+
+            $table->foreignId('user_id')
+                ->constrained()
+                ->cascadeOnDelete();
+
+            $table->foreignId('email_id')
+                ->constrained()
+                ->cascadeOnDelete();
+
             $table->string('result');
-            $table->float('score', 2);
-            $table->float('cost', 2);
+            $table->decimal('score', 5, 2);
+            $table->decimal('cost', 8, 4);
             $table->string('source');
+
             $table->timestamps();
+
+            // índices útiles para tu caso
+            $table->index('user_id');
+            $table->index('email_id');
         });
     }
 

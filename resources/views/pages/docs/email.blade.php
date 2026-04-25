@@ -75,7 +75,7 @@
     function testAPI() {
         const email = document.getElementById('emailInput').value;
         const url = '{{ config('app.url') . '/api/validate-email' }}';
-        const apiKey = '{{ Auth::user()->getAPIKey() }}';
+        const apiKey = '{{ Auth::user() ? Auth::user()->getAPIKey() : 'API KEY' }}';
         const data = {
             email: email
         };

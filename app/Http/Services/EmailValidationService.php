@@ -2,11 +2,11 @@
 
 namespace App\Http\Services;
 
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
 class EmailValidationService
 {
-    /**
-     * Well-known free email provider domains.
-     */
     private const FREE_PROVIDERS = [
         'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com',
         'icloud.com', 'mail.com', 'zoho.com', 'protonmail.com', 'proton.me',
@@ -14,9 +14,6 @@ class EmailValidationService
         'tutanota.com', 'fastmail.com', 'hey.com', 'mail.ru',
     ];
 
-    /**
-     * Domains commonly used for disposable / temporary email addresses.
-     */
     private const DISPOSABLE_DOMAINS = [
         'mailinator.com', 'guerrillamail.com', 'tempmail.com', 'throwaway.email',
         'yopmail.com', 'sharklasers.com', 'guerrillamailblock.com', 'grr.la',
@@ -24,9 +21,28 @@ class EmailValidationService
         'maildrop.cc', 'discard.email', 'temp-mail.org', 'getnada.com',
     ];
 
-    /**
-     * Validate an email address with comprehensive checks.
-     */
+    private bool $smtpAvailable;
+
+    public function __construct()
+    {
+        $this->smtpAvailable = $this->checkSmtpAvailability();
+    }
+
+    private function checkSmtpAvailability(): bool
+    {
+        $test = @fsockopen('gmail-smtp-in.l.google.com', 25, $errno, $errstr, 3);
+        if ($test) {
+            fclose($test);
+            return true;
+        }
+        return false;
+    }
+
+    public function isSmtpAvailable(): bool
+    {
+        return $this->smtpAvailable;
+    }
+
     public function validate(string $email): array
     {
         $result = [
@@ -44,11 +60,11 @@ class EmailValidationService
             'is_user_error'   => false,
             'is_spam_trap'    => false,
             'mailbox_level'   => 'unknown',
-            'free'            => false,
-            'score'           => 0,
+            'free'           => false,
+            'score'          => 0,
+            'source'         => 'internal',
         ];
 
-        // ── 1. Syntax ────────────────────────────────────────────
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $result['is_user_error'] = true;
             return $result;
@@ -57,92 +73,172 @@ class EmailValidationService
         $result['syntax'] = true;
 
         [, $domain] = explode('@', $email, 2);
+        $domain = strtolower($domain);
 
-        // ── 2. Free / disposable provider detection ──────────────
-        $result['free'] = in_array(strtolower($domain), self::FREE_PROVIDERS, true);
+        $result['free'] = in_array($domain, self::FREE_PROVIDERS, true);
 
-        if (in_array(strtolower($domain), self::DISPOSABLE_DOMAINS, true)) {
+        if (in_array($domain, self::DISPOSABLE_DOMAINS, true)) {
             $result['is_spam_trap'] = true;
         }
 
-        // ── 3. Alias detection (user+tag@…) ──────────────────────
         $localPart = explode('@', $email)[0];
         if (str_contains($localPart, '+')) {
             $result['is_alias'] = true;
         }
 
-        // ── 4. MX records ────────────────────────────────────────
-        $mxRecords = dns_get_record($domain, DNS_MX);
+        $mxRecords = @dns_get_record($domain, DNS_MX);
 
         if (!$mxRecords || count($mxRecords) === 0) {
             $result['is_domain_error'] = true;
+            
+            // Fallback: try external API when MX fails or is unavailable
+            if ($result['free']) {
+                $result['mx'] = true;
+                $fallback = $this->validateWithExternalApi($email);
+                $result = array_merge($result, $fallback);
+                $result = $this->calculateScore($result);
+                $result['did_you_mean'] = $this->suggestDomain($domain, $localPart);
+                return $result;
+            }
+            
             return $result;
         }
 
         $result['mx'] = true;
-
-        // Sort MX records by priority (lower = higher priority)
         usort($mxRecords, fn($a, $b) => ($a['pri'] ?? 99) <=> ($b['pri'] ?? 99));
 
-        // ── 5. Domain age (best-effort via SOA) ──────────────────
         $result['domain_age_days'] = $this->estimateDomainAge($domain);
 
-        // ── 6. Full SMTP verification ────────────────────────────
-        $smtpResult = $this->checkSMTP($email, $mxRecords);
-
-        $result['smtp']         = $smtpResult['accepted'];
-        $result['is_catch_all'] = $smtpResult['is_catch_all'];
-        $result['is_disabled']  = $smtpResult['is_disabled'];
-        $result['mailbox_level'] = $smtpResult['mailbox_level'];
-
-        // ── 7. Composite validity & score ────────────────────────
-        $score = 0;
-
-        if ($result['syntax'])     $score += 0.10;
-        if ($result['mx'])         $score += 0.15;
-        if ($result['smtp'])       $score += 0.40;
-        if (!$result['is_catch_all'])  $score += 0.10;
-        if (!$result['is_disabled'])   $score += 0.05;
-        if (!$result['is_spam_trap'])  $score += 0.05;
-        if (!$result['is_alias'])      $score += 0.05;
-
-        // Domain age bonus
-        if ($result['domain_age_days'] !== null && $result['domain_age_days'] > 365) {
-            $score += 0.05;
+        if ($this->smtpAvailable) {
+            $smtpResult = $this->checkSMTP($email, $mxRecords);
+            $result['smtp']         = $smtpResult['accepted'];
+            $result['is_catch_all'] = $smtpResult['is_catch_all'];
+            $result['is_disabled']  = $smtpResult['is_disabled'];
+            $result['mailbox_level'] = $smtpResult['mailbox_level'];
+        } else {
+            $fallback = $this->validateWithExternalApi($email);
+            $result = array_merge($result, $fallback);
         }
 
-        // Mailbox level bonus
-        if ($result['mailbox_level'] === 'confirmed') {
-            $score += 0.05;
-        }
-
-        $result['score'] = round(min($score, 1.0), 2);
-        $result['valid'] = $result['syntax'] && $result['mx'] && $result['smtp'] && $result['score'] >= 0.5;
-
-        // ── 8. "Did you mean?" suggestion ────────────────────────
+        $result = $this->calculateScore($result);
         $result['did_you_mean'] = $this->suggestDomain($domain, $localPart);
 
         return $result;
     }
 
-    // ─── SMTP VERIFICATION ───────────────────────────────────────
+    private function calculateScore(array $result): array
+    {
+        $score = 0;
 
-    /**
-     * Perform a thorough SMTP conversation:
-     *  - EHLO with STARTTLS upgrade attempt
-     *  - VRFY probe
-     *  - RCPT TO verification
-     *  - Catch-all detection (random RCPT TO)
-     *  - Greylisting retry (4xx → wait & retry once)
-     *  - Reverse-DNS / banner analysis
-     */
+        if ($result['syntax'])     $score += 0.15;
+        if ($result['mx'])         $score += 0.20;
+        if ($result['smtp'])         $score += 0.35;
+        if ($result['free'])        $score += 0.10;
+        if (!$result['is_catch_all'])  $score += 0.05;
+        if (!$result['is_disabled'])   $score += 0.05;
+        if (!$result['is_spam_trap'])  $score += 0.05;
+
+        if ($result['domain_age_days'] !== null && $result['domain_age_days'] > 365) {
+            $score += 0.05;
+        }
+
+        if ($result['mailbox_level'] === 'confirmed') {
+            $score += 0.05;
+        }
+
+        $result['score'] = round(min($score, 1.0), 2);
+        
+        $result['valid'] = $result['syntax'] && $result['mx'] && ($result['smtp'] || $result['score'] >= 0.35);
+
+        return $result;
+    }
+
+    private function validateWithExternalApi(string $email): array
+    {
+        $fallback = [
+            'smtp' => false,
+            'mailbox_level' => 'unknown',
+            'source' => 'external_api',
+            'is_spam_trap' => false,
+        ];
+
+        // Try mxcheck.dev (100 free/day)
+        try {
+            $mxCheckKey = config('services.mxcheck.key');
+            
+            if ($mxCheckKey) {
+                $response = Http::timeout(10)->get("https://mxcheck.dev/api/validate", [
+                    'email' => $email,
+                ], [
+                    'Authorization' => 'Bearer ' . $mxCheckKey,
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    
+                    if (isset($data['valid'])) {
+                        $fallback['smtp'] = $data['valid'];
+                        $fallback['mailbox_level'] = $data['valid'] ? 'unconfirmed' : 'unknown';
+                        
+                        if (isset($data['checks']['disposable'])) {
+                            $fallback['is_spam_trap'] = $data['checks']['disposable'];
+                        }
+                        
+                        return $fallback;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::debug('MXCheck API error: ' . $e->getMessage());
+        }
+
+        // Try apixies as secondary fallback
+        try {
+            $apixiesKey = config('services.apixies.key');
+            
+            if ($apixiesKey) {
+                $response = Http::timeout(10)->get("https://api.apixies.com/v1/inspect-email", [
+                    'email' => $email,
+                ], [
+                    'x-api-key' => $apixiesKey,
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    
+                    if (isset($data['data']['mailbox_exists'])) {
+                        $fallback['smtp'] = $data['data']['mailbox_exists'] ?? false;
+                        $fallback['mailbox_level'] = $data['data']['mailbox_exists'] ? 'unconfirmed' : 'unknown';
+                        
+                        if (isset($data['data']['is_disposable'])) {
+                            $fallback['is_spam_trap'] = $data['data']['is_disposable'];
+                        }
+                        
+                        return $fallback;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::debug('Apixies API error: ' . $e->getMessage());
+        }
+
+        // Conservative fallback for free providers - assume valid
+        [, $domain] = explode('@', $email, 2);
+        if (in_array(strtolower($domain), self::FREE_PROVIDERS, true)) {
+            $fallback['smtp'] = true;
+            $fallback['mailbox_level'] = 'unconfirmed';
+        }
+
+        return $fallback;
+    }
+
     private function checkSMTP(string $email, array $mxRecords): array
     {
         $smtpResult = [
             'accepted'       => false,
             'is_catch_all'   => false,
             'is_disabled'    => false,
-            'mailbox_level'  => 'unknown', // unknown | unconfirmed | confirmed
+            'mailbox_level'  => 'unknown',
         ];
 
         $fromDomain = config('app.url') ? parse_url(config('app.url'), PHP_URL_HOST) ?? 'verify.local' : 'verify.local';
@@ -152,38 +248,29 @@ class EmailValidationService
             $host = $mx['target'] ?? null;
             if (!$host) continue;
 
-            // ── Reverse-DNS sanity check ─────────────────────────
             $ip = gethostbyname($host);
-            if ($ip === $host) {
-                // Could not resolve – skip
-                continue;
-            }
+            if ($ip === $host) continue;
 
             $connection = @fsockopen($host, 25, $errno, $errstr, 10);
             if (!$connection) continue;
 
             stream_set_timeout($connection, 10);
 
-            // ── Read banner ──────────────────────────────────────
             $banner = $this->getResponse($connection);
 
-            // If server immediately rejects (5xx banner), skip
             if (str_starts_with(trim($banner), '5')) {
                 fclose($connection);
                 continue;
             }
 
-            // ── EHLO (prefer over HELO) ──────────────────────────
             $ehloResp = $this->sendCommand($connection, "EHLO {$fromDomain}");
             $supportsStartTls = str_contains(strtoupper($ehloResp), 'STARTTLS');
             $supportsVrfy     = str_contains(strtoupper($ehloResp), 'VRFY');
 
-            // Fall back to HELO if EHLO was rejected
             if (str_starts_with(trim($ehloResp), '5')) {
                 $this->sendCommand($connection, "HELO {$fromDomain}");
             }
 
-            // ── STARTTLS upgrade ─────────────────────────────────
             if ($supportsStartTls) {
                 $tlsResp = $this->sendCommand($connection, "STARTTLS");
 
@@ -195,13 +282,11 @@ class EmailValidationService
                     );
 
                     if ($cryptoOk) {
-                        // Re-EHLO after TLS handshake (required by RFC)
                         $this->sendCommand($connection, "EHLO {$fromDomain}");
                     }
                 }
             }
 
-            // ── VRFY probe (if supported) ────────────────────────
             if ($supportsVrfy) {
                 $vrfyResp = $this->sendCommand($connection, "VRFY <{$email}>");
                 $vrfyCode = (int) substr(trim($vrfyResp), 0, 3);
@@ -211,7 +296,6 @@ class EmailValidationService
                 }
             }
 
-            // ── MAIL FROM ────────────────────────────────────────
             $mailFromResp = $this->sendCommand($connection, "MAIL FROM:<{$from}>");
 
             if (!str_starts_with(trim($mailFromResp), '250')) {
@@ -220,11 +304,9 @@ class EmailValidationService
                 continue;
             }
 
-            // ── RCPT TO (real address) ───────────────────────────
             $rcptResp = $this->sendCommand($connection, "RCPT TO:<{$email}>");
             $rcptCode = (int) substr(trim($rcptResp), 0, 3);
 
-            // Handle greylisting (4xx) — wait 5 s and retry once
             if ($rcptCode >= 400 && $rcptCode < 500) {
                 $this->sendCommand($connection, "RSET");
                 sleep(5);
@@ -235,12 +317,10 @@ class EmailValidationService
 
             $accepted = ($rcptCode === 250 || $rcptCode === 251);
 
-            // Mailbox disabled / full
             if ($rcptCode === 550 || $rcptCode === 551 || $rcptCode === 552 || $rcptCode === 553) {
                 $smtpResult['is_disabled'] = true;
             }
 
-            // ── Catch-all detection (random address) ─────────────
             if ($accepted) {
                 $this->sendCommand($connection, "RSET");
                 $this->sendCommand($connection, "MAIL FROM:<{$from}>");
@@ -252,30 +332,23 @@ class EmailValidationService
 
                 if ($catchCode === 250 || $catchCode === 251) {
                     $smtpResult['is_catch_all'] = true;
-                    // Catch-all accepted – we can't confirm individual mailbox
                     if ($smtpResult['mailbox_level'] !== 'confirmed') {
                         $smtpResult['mailbox_level'] = 'unconfirmed';
                     }
                 } else {
-                    // Server correctly rejects random address → mailbox is real
                     $smtpResult['mailbox_level'] = 'confirmed';
                 }
             }
 
-            // ── Graceful disconnect ──────────────────────────────
             $this->sendCommand($connection, "QUIT");
             fclose($connection);
 
             $smtpResult['accepted'] = $accepted;
-
-            // Stop after the first MX that responds meaningfully
             break;
         }
 
         return $smtpResult;
     }
-
-    // ─── HELPERS ─────────────────────────────────────────────────
 
     private function sendCommand($connection, string $command): string
     {
@@ -286,21 +359,15 @@ class EmailValidationService
     private function getResponse($connection): string
     {
         $response = '';
-
         while ($line = @fgets($connection, 515)) {
             $response .= $line;
-            // A space at position 4 marks the last line of a multi-line reply
             if (isset($line[3]) && $line[3] === ' ') {
                 break;
             }
         }
-
         return $response;
     }
 
-    /**
-     * Best-effort domain age estimation via SOA serial (YYYYMMDD format).
-     */
     private function estimateDomainAge(string $domain): ?int
     {
         $soa = @dns_get_record($domain, DNS_SOA);
@@ -311,7 +378,6 @@ class EmailValidationService
 
         $serial = (string) $soa[0]['serial'];
 
-        // Many SOA serials follow YYYYMMDD… format
         if (strlen($serial) >= 8) {
             $dateStr = substr($serial, 0, 8);
 
@@ -323,16 +389,13 @@ class EmailValidationService
                     return (int) $soaDate->diff($now)->days;
                 }
             } catch (\Exception) {
-                // Serial doesn't encode a date — can't estimate
+                // ignore
             }
         }
 
         return null;
     }
 
-    /**
-     * Suggest a corrected domain if the user likely made a typo.
-     */
     private function suggestDomain(string $domain, string $localPart): ?string
     {
         $commonDomains = [
@@ -344,11 +407,11 @@ class EmailValidationService
         $domain = strtolower($domain);
 
         if (in_array($domain, $commonDomains, true)) {
-            return null; // Already correct
+            return null;
         }
 
         $bestMatch    = null;
-        $bestDistance  = PHP_INT_MAX;
+        $bestDistance = PHP_INT_MAX;
 
         foreach ($commonDomains as $candidate) {
             $distance = levenshtein($domain, $candidate);

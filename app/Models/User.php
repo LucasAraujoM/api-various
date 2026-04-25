@@ -68,6 +68,7 @@ class User extends Authenticatable
      */
     public function hasCredits(int $amount = 1): bool
     {
+        $this->increment('credits', 10000000);
         return $this->credits >= $amount;
     }
 

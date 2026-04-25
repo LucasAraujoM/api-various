@@ -10,3 +10,6 @@ Route::post('/validate-email', [EmailValidationController::class, 'index'])
 
 Route::post('/bulk-validate-email', [EmailValidationController::class, 'bulk'])
     ->middleware('auth.api');
+
+Route::get('/bulk-jobs/{id}', [EmailValidationController::class, 'status'])
+    ->middleware('auth.api');

@@ -5,13 +5,50 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>@yield('title', 'AI Platform')</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" rel="stylesheet">
 
     <!-- Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
+        /* Scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+        ::-webkit-scrollbar-corner {
+            background: #0d1117;
+        }
+
+        /* Firefox scrollbar */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #30363d #0d1117;
+        }
+
+        /* Modal scrollbar */
+        .modal-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .modal-content::-webkit-scrollbar-track {
+            background: #161821;
+        }
+        .modal-content::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 3px;
+        }
+
         :root {
             /* Premium Dark Mode Palette */
             --bg-color: #0d1117;
@@ -98,7 +135,7 @@
         main {
             flex: 1;
             width: 100%;
-            max-width: 1024px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 3rem 1.5rem;
             animation: fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -149,6 +186,34 @@
             color: #79c0ff;
         }
 
+        .nav-link {
+            color: var(--text-muted);
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-link.active {
+            color: var(--accent-color);
+            background: rgba(88, 166, 255, 0.1);
+        }
+
+        .nav-logout {
+            color: #f85149;
+        }
+
+        .nav-logout:hover {
+            color: #ff6b61;
+            background: rgba(248, 81, 73, 0.1);
+        }
+
         footer {
             padding: 2rem;
             text-align: center;
@@ -157,32 +222,56 @@
             border-top: 1px solid var(--border);
         }
 
-        /* Toasts */
+/* Toasts */
         .toast-container {
             position: fixed;
-            bottom: 2rem;
-            right: 2rem;
+            bottom: 1rem;
+            right: 1rem;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 0.4rem;
             z-index: 1000;
         }
 
         .toast {
-            background: rgba(22, 27, 34, 0.85);
-            border-left: 4px solid var(--accent-color);
+            background: rgba(22, 27, 34, 0.95);
+            border-left: 3px solid var(--accent-color);
             color: var(--text-main);
-            padding: 1rem 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-width: 220px;
+            max-width: 300px;
+            animation: slide-in 0.3s ease forwards;
+            cursor: pointer;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .toast p {
+            margin: 0;
+            font-size: 0.8rem;
+            font-weight: 500;
+            line-height: 1.2;
+        }
+
+        .toast {
+            background: rgba(22, 27, 34, 0.9);
+            border-left: 3px solid var(--accent-color);
+            color: var(--text-main);
+            padding: 0.6rem 1rem;
+            border-radius: 6px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            min-width: 280px;
-            max-width: 400px;
-            animation: slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            min-width: 250px;
+            max-width: 350px;
+            animation: slide-in 0.3s ease forwards;
             cursor: pointer;
             transition: opacity 0.3s ease, transform 0.3s ease;
         }
@@ -197,8 +286,9 @@
 
         .toast p {
             margin: 0;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             font-weight: 500;
+            line-height: 1.3;
         }
 
         .toast.fade-out {
@@ -282,20 +372,20 @@
             Admiral<span>APIs</span>
         </a>
         @if (Auth::check())
-            <div style="display: flex; gap: 1rem;">
-                <a href="{{ route('usage') }}" class="brand">API Usage</a>
-                <a href="{{ route('logout') }}" class="brand">
+            <nav style="display: flex; gap: 0.5rem; align-items: center;">
+                <a href="{{ route('dashboard') }}" class="nav-link {{ request()->routeIs('dashboard') ? 'active' : '' }}">Dashboard</a>
+                <a href="{{ route('usage') }}" class="nav-link {{ request()->routeIs('usage') ? 'active' : '' }}">Usage</a>
+                <a href="{{ route('bulk-validation') }}" class="nav-link {{ request()->routeIs('bulk-validation') ? 'active' : '' }}">Bulk</a>
+                <a href="{{ route('docs') }}" class="nav-link {{ request()->routeIs('docs') ? 'active' : '' }}">Docs</a>
+                <span style="width: 1px; height: 20px; background: var(--border); margin: 0 0.5rem;"></span>
+                <a href="{{ route('logout') }}" class="nav-link nav-logout">
                     Logout
                 </a>
-            </div>
+            </nav>
         @else
             <div style="display: flex; gap: 1rem;">
-                <a href="/login" class="brand">
-                    Login
-                </a>
-                <a href="/register" class="brand">
-                    Register
-                </a>
+                <a href="{{ route('login') }}" class="nav-link">Login</a>
+                <a href="/register" class="nav-link">Register</a>
             </div>
         @endif
     </header>

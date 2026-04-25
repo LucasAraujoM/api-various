@@ -8,10 +8,10 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 
 #[Fillable([
     'user_id',
-    'file_path',
     'total',
     'processed',
     'status',
+    'results',
 ])]
 class BulkJob extends Model
 {
@@ -20,7 +20,23 @@ class BulkJob extends Model
         return [
             'total'     => 'integer',
             'processed' => 'integer',
+            'results'   => 'array',
         ];
+    }
+
+    public function cancel(): void
+    {
+        $this->update(['status' => 'cancelled']);
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === 'cancelled';
+    }
+
+    public function canCancel(): bool
+    {
+        return in_array($this->status, ['pending', 'processing']);
     }
 
     // ─── Relationships ───────────────────────────────────────
